@@ -1,0 +1,6 @@
+2025.3.15
+1. 配置环境StyleID
+2. 配置sd1.4
+    下载checkpoint
+    huggingface-cli download CompVis/stable-diffusion-v-1-4-original sd-v1-4.ckpt --resume-download --local-dir /data2/ranxiangyu/checkpoints
+    ln -s /data2/ranxiangyu/checkpoints/sd-v1-4.ckpt /home/ranxiangyu/StyleID/models/ldm/stable-diffusion-v1/model.ckpt
