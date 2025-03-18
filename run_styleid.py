@@ -1,10 +1,10 @@
-import argparse, os
+import argparse, os #解析命令行参数
 import torch
 import numpy as np
-from omegaconf import OmegaConf
+from omegaconf import OmegaConf  # 加载模型配置文件
 from PIL import Image
 from einops import rearrange
-from pytorch_lightning import seed_everything
+from pytorch_lightning import seed_everything #设置随机种子
 from torch import autocast
 from contextlib import nullcontext
 import copy
@@ -17,7 +17,7 @@ import torch.nn.functional as F
 import time
 import pickle
 
-feat_maps = []
+feat_maps = [] # 全局变量，用于存储特征图
 
 def save_img_from_sample(model, samples_ddim, fname):
     x_samples_ddim = model.decode_first_stage(samples_ddim)
@@ -50,6 +50,7 @@ def feat_merge(opt, cnt_feats, sty_feats, start_step=0):
     return feat_maps
 
 
+# 定义加载图片函数
 def load_img(path):
     image = Image.open(path).convert("RGB")
     x, y = image.size
@@ -62,6 +63,7 @@ def load_img(path):
     image = torch.from_numpy(image)
     return 2.*image - 1.
 
+# 定义AdaIN函数 自适应实例归一化
 def adain(cnt_feat, sty_feat):
     cnt_mean = cnt_feat.mean(dim=[0, 2, 3],keepdim=True)
     cnt_std = cnt_feat.std(dim=[0, 2, 3],keepdim=True)
@@ -70,6 +72,7 @@ def adain(cnt_feat, sty_feat):
     output = ((cnt_feat-cnt_mean)/cnt_std)*sty_std + sty_mean
     return output
 
+# 模型加载函数
 def load_model_from_config(config, ckpt, verbose=False):
     print(f"Loading model from {ckpt}")
     pl_sd = torch.load(ckpt, map_location="cpu")
@@ -90,6 +93,7 @@ def load_model_from_config(config, ckpt, verbose=False):
     return model
 
 def main():
+    # 解析命令行参数 设置各种选项
     parser = argparse.ArgumentParser()
     parser.add_argument('--cnt', default = './data/cnt')
     parser.add_argument('--sty', default = './data/sty')
@@ -115,44 +119,51 @@ def main():
 
     feat_path_root = opt.precomputed
 
-    seed_everything(22)
+    seed_everything(22) # 设置随机种子
+    # 创建输出文件夹 如果有则不创建
     output_path = opt.output_path
     os.makedirs(output_path, exist_ok=True)
+    # 创建特征文件夹 如果有则不创建
     if len(feat_path_root) > 0:
         os.makedirs(feat_path_root, exist_ok=True)
     
-    model_config = OmegaConf.load(f"{opt.model_config}")
-    model = load_model_from_config(model_config, f"{opt.ckpt}")
+    model_config = OmegaConf.load(f"{opt.model_config}") # 加载模型配置文件 ldm/models/ldm/stable-diffusion-v1/v1-inference.yaml
+    model = load_model_from_config(model_config, f"{opt.ckpt}") #从配置点checkpoint文件和配置文件加载模型 ldm/models/ldm/stable-diffusion-v1/model.ckpt
 
+    # 设置设备和采样器
     self_attn_output_block_indices = list(map(int, opt.attn_layer.split(',')))
     ddim_inversion_steps = opt.ddim_inv_steps
     save_feature_timesteps = ddim_steps = opt.save_feat_steps
 
-    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu") # 判断是否有cuda
     model = model.to(device)
     unet_model = model.model.diffusion_model
-    sampler = DDIMSampler(model)
-    sampler.make_schedule(ddim_num_steps=ddim_steps, ddim_eta=opt.ddim_eta, verbose=False) 
-    time_range = np.flip(sampler.ddim_timesteps)
+    sampler = DDIMSampler(model) # 初始化DDIM采样器
+    sampler.make_schedule(ddim_num_steps=ddim_steps, ddim_eta=opt.ddim_eta, verbose=False)  # 设置采样器的步长和eta
+    time_range = np.flip(sampler.ddim_timesteps) # 获取时间步长的反转顺序
+    # 建立时间步长和索引之间的映射
     idx_time_dict = {}
     time_idx_dict = {}
     for i, t in enumerate(time_range):
         idx_time_dict[t] = i
         time_idx_dict[i] = t
 
-    seed = torch.initial_seed()
+    seed = torch.initial_seed() # 获取随机种子
     opt.seed = seed
 
-    global feat_maps
+    global feat_maps # 初始化全局变量
     feat_maps = [{'config': {
                 'gamma':opt.gamma,
                 'T':opt.T
                 }} for _ in range(50)]
 
+    # 定义回掉函数 
+    # 在采用过程调用保存特征图
     def ddim_sampler_callback(pred_x0, xt, i):
         save_feature_maps_callback(i)
         save_feature_map(xt, 'z_enc', i)
 
+    # 保存特定块的特征图
     def save_feature_maps(blocks, i, feature_type="input_block"):
         block_idx = 0
         for block_idx, block in enumerate(blocks):
@@ -167,22 +178,29 @@ def main():
                     save_feature_map(v, f"{feature_type}_{block_idx}_self_attn_v", i)
             block_idx += 1
 
+    # 保存输出块的特征图
     def save_feature_maps_callback(i):
         save_feature_maps(unet_model.output_blocks , i, "output_block")
 
+    # 保存单个特征图
     def save_feature_map(feature_map, filename, time):
         global feat_maps
         cur_idx = idx_time_dict[time]
         feat_maps[cur_idx][f"{filename}"] = feature_map
 
-    start_step = opt.start_step
-    precision_scope = autocast if opt.precision=="autocast" else nullcontext
-    uc = model.get_learned_conditioning([""])
-    shape = [opt.C, opt.H // opt.f, opt.W // opt.f]
-    sty_img_list = sorted(os.listdir(opt.sty))
+    # 加载图像并进行风格迁移
+    start_step = opt.start_step # 从命令行获取开始步长 default=49
+    # DDIM一般是进行50步采样，默认值为49代表着从倒数第二步开始采样
+    # 一般情况下，第50步的采样是最接近原始图像的
+    # start——step控制起始步数
+    precision_scope = autocast if opt.precision=="autocast" else nullcontext # 根据命令行参数设置精度
+    uc = model.get_learned_conditioning([""])   # 获取模型的无条件学习条件
+    shape = [opt.C, opt.H // opt.f, opt.W // opt.f] # 设置形状 default=[4, 64, 64]
+    sty_img_list = sorted(os.listdir(opt.sty))  # 获取风格图片列表 
     cnt_img_list = sorted(os.listdir(opt.cnt))
 
-    begin = time.time()
+    begin = time.time() # 开始计时
+    # 遍历风格图片
     for sty_name in sty_img_list:
         sty_name_ = os.path.join(opt.sty, sty_name)
         init_sty = load_img(sty_name_).to(device)
@@ -190,6 +208,7 @@ def main():
         sty_feat_name = os.path.join(feat_path_root, os.path.basename(sty_name).split('.')[0] + '_sty.pkl')
         sty_z_enc = None
 
+        # 检查是否存在与预计算的风格特征文件
         if len(feat_path_root) > 0 and os.path.isfile(sty_feat_name):
             print("Precomputed style feature loading: ", sty_feat_name)
             with open(sty_feat_name, 'rb') as h:
@@ -204,14 +223,14 @@ def main():
             sty_feat = copy.deepcopy(feat_maps)
             sty_z_enc = feat_maps[0]['z_enc']
 
-
+        # 遍历内容图片
         for cnt_name in cnt_img_list:
             cnt_name_ = os.path.join(opt.cnt, cnt_name)
             init_cnt = load_img(cnt_name_).to(device)
             cnt_feat_name = os.path.join(feat_path_root, os.path.basename(cnt_name).split('.')[0] + '_cnt.pkl')
             cnt_feat = None
 
-            # ddim inversion encoding
+            # ddim inversion encoding 预处理
             if len(feat_path_root) > 0 and os.path.isfile(cnt_feat_name):
                 print("Precomputed content feature loading: ", cnt_feat_name)
                 with open(cnt_feat_name, 'rb') as h:
@@ -226,6 +245,7 @@ def main():
                 cnt_feat = copy.deepcopy(feat_maps)
                 cnt_z_enc = feat_maps[0]['z_enc']
 
+            # 开始风格迁移
             with torch.no_grad():
                 with precision_scope("cuda"):
                     with model.ema_scope():

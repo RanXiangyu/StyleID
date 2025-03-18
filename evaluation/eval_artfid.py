@@ -15,6 +15,8 @@ import image_metrics
 
 ALLOWED_IMAGE_EXTENSIONS = ['jpg', 'JPG', 'jpeg', 'JPEG', 'png', 'PNG']
 CKPT_URL = 'https://huggingface.co/matthias-wright/art_inception/resolve/main/art_inception.pth'
+# CKPT_URL = 'https://huggingface.co/matthias-wright/art_inception/resolve/tree/main/art_inception.pth'
+# https://huggingface.co/matthias-wright/art_inception/tree/main
 
 
 class ImagePathDataset(torch.utils.data.Dataset):
@@ -182,7 +184,9 @@ def compute_fid(path_to_stylized, path_to_style, batch_size, device, num_workers
     """
     device = torch.device('cuda') if device == 'cuda' and torch.cuda.is_available() else torch.device('cpu')
 
-    ckpt_file = utils.download(CKPT_URL)
+    # ckpt_file = utils.download(CKPT_URL)
+     # 修改这里，使用本地文件路径
+    ckpt_file = '/data2/ranxiangyu/checkpoints/art_inception.pth'
     ckpt = torch.load(ckpt_file, map_location=device)
     
     model = inception.Inception3().to(device)
@@ -215,7 +219,9 @@ def compute_fid_infinity(path_to_stylized, path_to_style, batch_size, device, nu
     """
     device = torch.device('cuda') if device == 'cuda' and torch.cuda.is_available() else torch.device('cpu')
 
-    ckpt_file = utils.download(CKPT_URL)
+    # ckpt_file = utils.download(CKPT_URL)
+    # 修改为本地ckpt文件代码
+    ckpt_file = '/data2/ranxiangyu/checkpoints/art_inception.pth'
     ckpt = torch.load(ckpt_file, map_location=device)
     
     model = inception.Inception3().to(device)
