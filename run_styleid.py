@@ -234,7 +234,7 @@ def main():
             if len(feat_path_root) > 0 and os.path.isfile(cnt_feat_name):
                 print("Precomputed content feature loading: ", cnt_feat_name)
                 with open(cnt_feat_name, 'rb') as h:
-                    cnt_feat = pickle.load(h)
+                    cnt_feat = pickle.load(h) 
                     cnt_z_enc = torch.clone(cnt_feat[0]['z_enc'])
             else:
                 init_cnt = model.get_first_stage_encoding(model.encode_first_stage(init_cnt))
@@ -250,14 +250,18 @@ def main():
                 with precision_scope("cuda"):
                     with model.ema_scope():
                         # inversion
+                        # 生成输出文件名
                         output_name = f"{os.path.basename(cnt_name).split('.')[0]}_stylized_{os.path.basename(sty_name).split('.')[0]}.png"
-
+                        # 打印反演结束时间
                         print(f"Inversion end: {time.time() - begin}")
+                        # 进行AdaIn处理
                         if opt.without_init_adain:
                             adain_z_enc = cnt_z_enc
                         else:
                             adain_z_enc = adain(cnt_z_enc, sty_z_enc)
+                        # 合并特征图
                         feat_maps = feat_merge(opt, cnt_feat, sty_feat, start_step=start_step)
+                        # 如果命令行参数的without_attn_injection为真，则不注入特征图
                         if opt.without_attn_injection:
                             feat_maps = None
 
@@ -272,14 +276,14 @@ def main():
                                                         injected_features=feat_maps,
                                                         start_step=start_step,
                                                         )
-
+                        # 解码生成图像
                         x_samples_ddim = model.decode_first_stage(samples_ddim)
                         x_samples_ddim = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
                         x_samples_ddim = x_samples_ddim.cpu().permute(0, 2, 3, 1).numpy()
                         x_image_torch = torch.from_numpy(x_samples_ddim).permute(0, 3, 1, 2)
                         x_sample = 255. * rearrange(x_image_torch[0].cpu().numpy(), 'c h w -> h w c')
                         img = Image.fromarray(x_sample.astype(np.uint8))
-
+                        # 保存特征图    
                         img.save(os.path.join(output_path, output_name))
                         if len(feat_path_root) > 0:
                             print("Save features")

@@ -13,12 +13,13 @@ import utils
 import inception
 import image_metrics
 
+# 定义常量和辅助类
 ALLOWED_IMAGE_EXTENSIONS = ['jpg', 'JPG', 'jpeg', 'JPEG', 'png', 'PNG']
 CKPT_URL = 'https://huggingface.co/matthias-wright/art_inception/resolve/main/art_inception.pth'
 # CKPT_URL = 'https://huggingface.co/matthias-wright/art_inception/resolve/tree/main/art_inception.pth'
 # https://huggingface.co/matthias-wright/art_inception/tree/main
 
-
+# 用于加载图像路径的数据集类
 class ImagePathDataset(torch.utils.data.Dataset):
     def __init__(self, files, transforms=None):
         self.files = files
@@ -34,7 +35,7 @@ class ImagePathDataset(torch.utils.data.Dataset):
             img = self.transforms(img)
         return img
 
-
+# 用于计算所有图像的激活值
 def get_activations(files, model, batch_size=50, device='cpu', num_workers=1):
     """Computes the activations of for all images.
 
@@ -82,7 +83,7 @@ def get_activations(files, model, batch_size=50, device='cpu', num_workers=1):
     pbar.close()
     return pred_arr
 
-
+# 计算frechet距离
 def compute_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
     """Numpy implementation of the Frechet Distance.
     
@@ -130,7 +131,7 @@ def compute_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
 
     return (diff.dot(diff) + np.trace(sigma1) + np.trace(sigma2) - 2 * tr_covmean)
 
-
+# 计算激活统计量
 def compute_activation_statistics(files, model, batch_size=50, device='cpu', num_workers=1):
     """Computes the activation statistics used by the FID.
     
@@ -150,7 +151,7 @@ def compute_activation_statistics(files, model, batch_size=50, device='cpu', num
     sigma = np.cov(act, rowvar=False)
     return mu, sigma
 
-
+# 用于获取指定目录中的图像路径
 def get_image_paths(path, sort=False):
     """Returns the paths of the images in the specified directory, filtered by allowed file extensions.
 
