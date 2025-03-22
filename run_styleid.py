@@ -8,6 +8,8 @@ from pytorch_lightning import seed_everything #设置随机种子
 from torch import autocast
 from contextlib import nullcontext
 import copy
+import h5py
+from torch.utils.data import DataLoader, Dataset
 
 from ldm.util import instantiate_from_config
 from ldm.models.diffusion.ddim import DDIMSampler
@@ -92,6 +94,29 @@ def load_model_from_config(config, ckpt, verbose=False):
     model.eval()
     return model
 
+class H5Dataset(Dataset):
+    def __init__(self, h5_path, transform=None):
+        self.h5_path = h5_path
+        self.transform = transform
+        with h5py.File(h5_path, 'r') as f:
+            self.keys = list(f.keys())
+
+    def __len__(self):
+        return len(self.keys)
+
+    def __getitem__(self, idx):
+        with h5py.File(self.h5_path, 'r') as f:
+            img = f[self.keys[idx]][:]
+        img = torch.tensor(img, dtype=torch.float32) / 255.0  # 将图像转换为浮点类型并归一化
+        if self.transform:
+            img = self.transform(img)
+        return img
+
+def create_dataloader(h5_path, batch_size=1, shuffle=False, transform=None):
+    dataset = H5Dataset(h5_path, transform=transform)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
+    return dataloader
+
 def main():
     # 解析命令行参数 设置各种选项
     parser = argparse.ArgumentParser()
@@ -115,6 +140,7 @@ def main():
     parser.add_argument('--output_path', type=str, default='output')
     parser.add_argument("--without_init_adain", action='store_true')
     parser.add_argument("--without_attn_injection", action='store_true')
+    parser.add_argument('--h5_path', type=str, default='', help='path to the h5 file containing content images')
     opt = parser.parse_args()
 
     feat_path_root = opt.precomputed
@@ -197,7 +223,16 @@ def main():
     uc = model.get_learned_conditioning([""])   # 获取模型的无条件学习条件
     shape = [opt.C, opt.H // opt.f, opt.W // opt.f] # 设置形状 default=[4, 64, 64]
     sty_img_list = sorted(os.listdir(opt.sty))  # 获取风格图片列表 
-    cnt_img_list = sorted(os.listdir(opt.cnt))
+
+    if opt.h5_path:
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Resize((opt.H, opt.W)),
+            transforms.Normalize((0.5,), (0.5,))
+        ])
+        dataloader = create_dataloader(opt.h5_path, transform=transform)
+    else:
+        cnt_img_list = sorted(os.listdir(opt.cnt))
 
     begin = time.time() # 开始计时
     # 遍历风格图片
@@ -210,7 +245,6 @@ def main():
 
         # 检查是否存在与预计算的风格特征文件
         if len(feat_path_root) > 0 and os.path.isfile(sty_feat_name):
-            print("Precomputed style feature loading: ", sty_feat_name)
             with open(sty_feat_name, 'rb') as h:
                 sty_feat = pickle.load(h)
                 sty_z_enc = torch.clone(sty_feat[0]['z_enc'])
@@ -224,71 +258,146 @@ def main():
             sty_z_enc = feat_maps[0]['z_enc']
 
         # 遍历内容图片
-        for cnt_name in cnt_img_list:
-            cnt_name_ = os.path.join(opt.cnt, cnt_name)
-            init_cnt = load_img(cnt_name_).to(device)
-            cnt_feat_name = os.path.join(feat_path_root, os.path.basename(cnt_name).split('.')[0] + '_cnt.pkl')
-            cnt_feat = None
+        if opt.h5_path:
+            for init_cnt in dataloader:
+                init_cnt = init_cnt.to(device)
+                cnt_name = "h5_image"
+                cnt_feat_name = os.path.join(feat_path_root, os.path.basename(cnt_name).split('.')[0] + '_cnt.pkl')
+                cnt_feat = None
 
-            # ddim inversion encoding 预处理
-            if len(feat_path_root) > 0 and os.path.isfile(cnt_feat_name):
-                print("Precomputed content feature loading: ", cnt_feat_name)
-                with open(cnt_feat_name, 'rb') as h:
-                    cnt_feat = pickle.load(h)
-                    cnt_z_enc = torch.clone(cnt_feat[0]['z_enc'])
-            else:
-                init_cnt = model.get_first_stage_encoding(model.encode_first_stage(init_cnt))
-                cnt_z_enc, _ = sampler.encode_ddim(init_cnt.clone(), num_steps=ddim_inversion_steps, unconditional_conditioning=uc, \
-                                                    end_step=time_idx_dict[ddim_inversion_steps-1-start_step], \
-                                                    callback_ddim_timesteps=save_feature_timesteps,
-                                                    img_callback=ddim_sampler_callback)
-                cnt_feat = copy.deepcopy(feat_maps)
-                cnt_z_enc = feat_maps[0]['z_enc']
+                # ddim inversion encoding 预处理
+                if len(feat_path_root) > 0 and os.path.isfile(cnt_feat_name):
+                    print("Precomputed content feature loading: ", cnt_feat_name)
+                    with open(cnt_feat_name, 'rb') as h:
+                        cnt_feat = pickle.load(h) 
+                        cnt_z_enc = torch.clone(cnt_feat[0]['z_enc'])
+                else:
+                    init_cnt = model.get_first_stage_encoding(model.encode_first_stage(init_cnt))
+                    cnt_z_enc, _ = sampler.encode_ddim(init_cnt.clone(), num_steps=ddim_inversion_steps, unconditional_conditioning=uc, \
+                                                        end_step=time_idx_dict[ddim_inversion_steps-1-start_step], \
+                                                        callback_ddim_timesteps=save_feature_timesteps,
+                                                        img_callback=ddim_sampler_callback)
+                    cnt_feat = copy.deepcopy(feat_maps)
+                    cnt_z_enc = feat_maps[0]['z_enc']
 
-            # 开始风格迁移
-            with torch.no_grad():
-                with precision_scope("cuda"):
-                    with model.ema_scope():
-                        # inversion
-                        output_name = f"{os.path.basename(cnt_name).split('.')[0]}_stylized_{os.path.basename(sty_name).split('.')[0]}.png"
+                # 开始风格迁移
+                with torch.no_grad():
+                    with precision_scope("cuda"):
+                        with model.ema_scope():
+                            # inversion
+                            # 生成输出文件名
+                            output_name = f"{os.path.basename(cnt_name).split('.')[0]}_stylized_{os.path.basename(sty_name).split('.')[0]}.png"
+                            # 打印反演结束时间
+                            print(f"Inversion end: {time.time() - begin}")
+                            # 进行AdaIn处理
+                            if opt.without_init_adain:
+                                adain_z_enc = cnt_z_enc
+                            else:
+                                adain_z_enc = adain(cnt_z_enc, sty_z_enc)
+                            # 合并特征图
+                            feat_maps = feat_merge(opt, cnt_feat, sty_feat, start_step=start_step)
+                            # 如果命令行参数的without_attn_injection为真，则不注入特征图
+                            if opt.without_attn_injection:
+                                feat_maps = None
 
-                        print(f"Inversion end: {time.time() - begin}")
-                        if opt.without_init_adain:
-                            adain_z_enc = cnt_z_enc
-                        else:
-                            adain_z_enc = adain(cnt_z_enc, sty_z_enc)
-                        feat_maps = feat_merge(opt, cnt_feat, sty_feat, start_step=start_step)
-                        if opt.without_attn_injection:
-                            feat_maps = None
+                            # inference
+                            samples_ddim, intermediates = sampler.sample(S=ddim_steps,
+                                                            batch_size=1,
+                                                            shape=shape,
+                                                            verbose=False,
+                                                            unconditional_conditioning=uc,
+                                                            eta=opt.ddim_eta,
+                                                            x_T=adain_z_enc,
+                                                            injected_features=feat_maps,
+                                                            start_step=start_step,
+                                                            )
+                            # 解码生成图像
+                            x_samples_ddim = model.decode_first_stage(samples_ddim)
+                            x_samples_ddim = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
+                            x_samples_ddim = x_samples_ddim.cpu().permute(0, 2, 3, 1).numpy()
+                            x_image_torch = torch.from_numpy(x_samples_ddim).permute(0, 3, 1, 2)
+                            x_sample = 255. * rearrange(x_image_torch[0].cpu().numpy(), 'c h w -> h w c')
+                            img = Image.fromarray(x_sample.astype(np.uint8))
+                            # 保存特征图    
+                            img.save(os.path.join(output_path, output_name))
+                            if len(feat_path_root) > 0:
+                                print("Save features")
+                                if not os.path.isfile(cnt_feat_name):
+                                    with open(cnt_feat_name, 'wb') as h:
+                                        pickle.dump(cnt_feat, h)
+                                if not os.path.isfile(sty_feat_name):
+                                    with open(sty_feat_name, 'wb') as h:
+                                        pickle.dump(sty_feat, h)
+        else:
+            for cnt_name in cnt_img_list:
+                cnt_name_ = os.path.join(opt.cnt, cnt_name)
+                init_cnt = load_img(cnt_name_).to(device)
+                cnt_feat_name = os.path.join(feat_path_root, os.path.basename(cnt_name).split('.')[0] + '_cnt.pkl')
+                cnt_feat = None
 
-                        # inference
-                        samples_ddim, intermediates = sampler.sample(S=ddim_steps,
-                                                        batch_size=1,
-                                                        shape=shape,
-                                                        verbose=False,
-                                                        unconditional_conditioning=uc,
-                                                        eta=opt.ddim_eta,
-                                                        x_T=adain_z_enc,
-                                                        injected_features=feat_maps,
-                                                        start_step=start_step,
-                                                        )
+                # ddim inversion encoding 预处理
+                if len(feat_path_root) > 0 and os.path.isfile(cnt_feat_name):
+                    print("Precomputed content feature loading: ", cnt_feat_name)
+                    with open(cnt_feat_name, 'rb') as h:
+                        cnt_feat = pickle.load(h) 
+                        cnt_z_enc = torch.clone(cnt_feat[0]['z_enc'])
+                else:
+                    init_cnt = model.get_first_stage_encoding(model.encode_first_stage(init_cnt))
+                    cnt_z_enc, _ = sampler.encode_ddim(init_cnt.clone(), num_steps=ddim_inversion_steps, unconditional_conditioning=uc, \
+                                                        end_step=time_idx_dict[ddim_inversion_steps-1-start_step], \
+                                                        callback_ddim_timesteps=save_feature_timesteps,
+                                                        img_callback=ddim_sampler_callback)
+                    cnt_feat = copy.deepcopy(feat_maps)
+                    cnt_z_enc = feat_maps[0]['z_enc']
 
-                        x_samples_ddim = model.decode_first_stage(samples_ddim)
-                        x_samples_ddim = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
-                        x_samples_ddim = x_samples_ddim.cpu().permute(0, 2, 3, 1).numpy()
-                        x_image_torch = torch.from_numpy(x_samples_ddim).permute(0, 3, 1, 2)
-                        x_sample = 255. * rearrange(x_image_torch[0].cpu().numpy(), 'c h w -> h w c')
-                        img = Image.fromarray(x_sample.astype(np.uint8))
+                # 开始风格迁移
+                with torch.no_grad():
+                    with precision_scope("cuda"):
+                        with model.ema_scope():
+                            # inversion
+                            # 生成输出文件名
+                            output_name = f"{os.path.basename(cnt_name).split('.')[0]}_stylized_{os.path.basename(sty_name).split('.')[0]}.png"
+                            # 打印反演结束时间
+                            print(f"Inversion end: {time.time() - begin}")
+                            # 进行AdaIn处理
+                            if opt.without_init_adain:
+                                adain_z_enc = cnt_z_enc
+                            else:
+                                adain_z_enc = adain(cnt_z_enc, sty_z_enc)
+                            # 合并特征图
+                            feat_maps = feat_merge(opt, cnt_feat, sty_feat, start_step=start_step)
+                            # 如果命令行参数的without_attn_injection为真，则不注入特征图
+                            if opt.without_attn_injection:
+                                feat_maps = None
 
-                        img.save(os.path.join(output_path, output_name))
-                        if len(feat_path_root) > 0:
-                            print("Save features")
-                            if not os.path.isfile(cnt_feat_name):
-                                with open(cnt_feat_name, 'wb') as h:
-                                    pickle.dump(cnt_feat, h)
-                            if not os.path.isfile(sty_feat_name):
-                                with open(sty_feat_name, 'wb') as h:
-                                    pickle.dump(sty_feat, h)
+                            # inference
+                            samples_ddim, intermediates = sampler.sample(S=ddim_steps,
+                                                            batch_size=1,
+                                                            shape=shape,
+                                                            verbose=False,
+                                                            unconditional_conditioning=uc,
+                                                            eta=opt.ddim_eta,
+                                                            x_T=adain_z_enc,
+                                                            injected_features=feat_maps,
+                                                            start_step=start_step,
+                                                            )
+                            # 解码生成图像
+                            x_samples_ddim = model.decode_first_stage(samples_ddim)
+                            x_samples_ddim = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
+                            x_samples_ddim = x_samples_ddim.cpu().permute(0, 2, 3, 1).numpy()
+                            x_image_torch = torch.from_numpy(x_samples_ddim).permute(0, 3, 1, 2)
+                            x_sample = 255. * rearrange(x_image_torch[0].cpu().numpy(), 'c h w -> h w c')
+                            img = Image.fromarray(x_sample.astype(np.uint8))
+                            # 保存特征图    
+                            img.save(os.path.join(output_path, output_name))
+                            if len(feat_path_root) > 0:
+                                print("Save features")
+                                if not os.path.isfile(cnt_feat_name):
+                                    with open(cnt_feat_name, 'wb') as h:
+                                        pickle.dump(cnt_feat, h)
+                                if not os.path.isfile(sty_feat_name):
+                                    with open(sty_feat_name, 'wb') as h:
+                                        pickle.dump(sty_feat, h)
 
     print(f"Total end: {time.time() - begin}")
 

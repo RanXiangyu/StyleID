@@ -1,0 +1,1 @@
+python /home/ranxiangyu/StyleID/run_styleid.py --sty /data2/ranxiangyu/styleid_out --h5_path /data2/ranxiangyu/kidney_patch/patches/22811he.h5 --output_path /data2/ranxiangyu/styleid_out

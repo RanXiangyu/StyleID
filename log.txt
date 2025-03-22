@@ -34,3 +34,7 @@
         检查 ls -lh /tmp/art_fid/art_inception.pth
     不能直接采用连接的方式
     修改了evaluation当中的代码，直接嫁给你计算文件指向data2对应的文件夹
+
+2025.3.21
+1. 修改使用wsi h5文件
+    python /home/ranxiangyu/StyleID/run_styleid.py --sty /data2/ranxiangyu/styleid_out/style/masson1.jpeg --h5_path /data2/ranxiangyu/kidney_patch/patches/22811he.h5 --output_path /data2/ranxiangyu/styleid_out
