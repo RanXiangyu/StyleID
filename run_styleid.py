@@ -18,7 +18,7 @@ import time
 import pickle
 
 feat_maps = [] # 全局变量，用于存储特征图
-
+# test
 def save_img_from_sample(model, samples_ddim, fname):
     x_samples_ddim = model.decode_first_stage(samples_ddim)
     x_samples_ddim = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
