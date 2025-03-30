@@ -23,6 +23,7 @@ import pickle
     --sty /data2/ranxiangyu/styleid_out/style \
     --output_path /data2/ranxiangyu/styleid_out/style_out/he2masson \
     --gamma 0.75 --T 1.5
+    --precomputed /data2/ranxiangyu/styleid_out/precomputed_feats \
 
 '''
 
@@ -208,7 +209,7 @@ def main(opt):
     uc = model.get_learned_conditioning([""])   # 获取模型的无条件学习条件
     shape = [opt.C, opt.H // opt.f, opt.W // opt.f] # 设置形状 default=[4, 64, 64]
     sty_img_list = sorted(os.listdir(opt.sty))  # 获取风格图片列表 
-    cnt_img_list = sorted(os.listdir(opt.cnt))
+    cnt_img_list = sorted(os.listdir(opt.cnt)) # 获取内容图片列表
 
     begin = time.time() # 开始计时
     # 遍历风格图片
