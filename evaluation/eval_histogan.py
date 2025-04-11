@@ -23,11 +23,15 @@ import argparse, os
   booktitle={CVPR},
   year={2021}
 }
+
+python eval_histogan.py --tar /data2/ranxiangyu/styleid_out/style_out/he2masson \
+ --sty /data2/ranxiangyu/styleid_out/style
+
 ####
 """
 
 EPS = 1e-6
-
+# 直方图计算模块
 class RGBuvHistBlock(nn.Module):
   def __init__(self, h=64, insz=150, resizing='interpolation',
                method='inverse-quadratic', sigma=0.02, intensity_scale=True,
@@ -219,7 +223,7 @@ loader = transforms.Compose(
 
 unloader = transforms.ToPILImage()  # reconvert into PIL image
 
-
+# 加载图片
 def image_loader(image_name):
     image = Image.open(image_name)
     # fake batch dimension required to fit network's input dimensions
@@ -244,26 +248,52 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--tar', default = './output')
 parser.add_argument('--sty', default = './data/sty_eval')
 opt = parser.parse_args()
-sty_path = opt.tar
-tar_path = opt.sty
+sty_path = opt.sty
+tar_path = opt.tar
 sty_list = sorted(os.listdir(sty_path))
 tar_list = sorted(os.listdir(tar_path))
-if len(sty_list) != len(tar_list):
-  print("The number of stylized and style images are not matched!!", f"sty: {len(sty_list)}, tar: {len(tar_list)}")
-  exit()
-hist_list = []
-for sty, tar in tqdm(zip(sty_list, tar_list), total=len(sty_list)):
-    sty_fname = os.path.join(sty_path, sty)
-    tar_fname = os.path.join(tar_path, tar)
-    input_image = image_loader(sty_fname)
-    target_image = image_loader(tar_fname)
+# if len(sty_list) != len(tar_list):
+#   print("The number of stylized and style images are not matched!!", f"sty: {len(sty_list)}, tar: {len(tar_list)}")
+  # exit()
+# hist_list = []
+# for sty, tar in tqdm(zip(sty_list, tar_list), total=len(sty_list)):
+#   # tqdm是一个进度条库；zip()是Python内置函数，它会将多个列表按元素配对，形成一个迭代
+#     sty_fname = os.path.join(sty_path, sty)
+#     tar_fname = os.path.join(tar_path, tar)
+#     input_image = image_loader(sty_fname)
+#     target_image = image_loader(tar_fname)
     
-    input_hist = histogram_block(input_image)
-    target_hist = histogram_block(target_image)
+#     input_hist = histogram_block(input_image)
+#     target_hist = histogram_block(target_image)
 
-    histogram_loss = (1/np.sqrt(2.0) * (torch.sqrt(torch.sum(
-        torch.pow(torch.sqrt(target_hist) - torch.sqrt(input_hist), 2)))) / 
-        input_hist.shape[0])
-    hist_list.append(histogram_loss)
+#     histogram_loss = (1/np.sqrt(2.0) * (torch.sqrt(torch.sum(
+#         torch.pow(torch.sqrt(target_hist) - torch.sqrt(input_hist), 2)))) / 
+#         input_hist.shape[0])
+#     hist_list.append(histogram_loss)
+
+
+N = len(tar_list) // len(sty_list)  # 计算每个 style 匹配多少个 target
+print(len(tar_list),len(sty_list),N)
+hist_list = []
+
+for i, sty in tqdm(enumerate(sty_list), total=len(sty_list)):  # 遍历 sty_list
+    sty_fname = os.path.join(sty_path, sty)
+
+    for j in range(N):  # 遍历与当前 style 对应的 target
+        tar = tar_list[i * N + j]  # 获取 target 的索引
+        tar_fname = os.path.join(tar_path, tar)
+
+        input_image = image_loader(sty_fname)
+        target_image = image_loader(tar_fname)
+
+        input_hist = histogram_block(input_image)
+        target_hist = histogram_block(target_image)
+
+        histogram_loss = (1 / np.sqrt(2.0) * (torch.sqrt(torch.sum(
+            torch.pow(torch.sqrt(target_hist) - torch.sqrt(input_hist), 2)))) /
+            input_hist.shape[0])
+        hist_list.append(histogram_loss)
+
+
 
 print("color matching loss:", (sum(hist_list) / len(hist_list)).item())

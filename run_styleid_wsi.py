@@ -299,12 +299,16 @@ def main(opt):
                         img.save(os.path.join(output_path, output_name))
                         if len(feat_path_root) > 0:
                             print("Save features")
-                            if not os.path.isfile(cnt_feat_name):
-                                with open(cnt_feat_name, 'wb') as h:
-                                    pickle.dump(cnt_feat, h)
+                            # 不保存内容特征图
+                            # if not os.path.isfile(cnt_feat_name):
+                            #     with open(cnt_feat_name, 'wb') as h:
+                            #         pickle.dump(cnt_feat, h)
                             if not os.path.isfile(sty_feat_name):
                                 with open(sty_feat_name, 'wb') as h:
                                     pickle.dump(sty_feat, h)
+                            #     # 删除中间文件
+                            # if os.path.isfile(cnt_feat_name):
+                            #     os.remove(cnt_feat_name)
 
     print(f"Total end: {time.time() - begin}")
 

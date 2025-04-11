@@ -12,6 +12,13 @@ from tqdm import tqdm
 import utils
 import inception
 import image_metrics
+'''
+python eval_artfid.py  --cnt /data2/ranxiangyu/kidney_patch/patch_png/level1/22811he \
+--sty /data2/ranxiangyu/styleid_out/style \
+ --tar /data2/ranxiangyu/styleid_out/style_out/he2masson \
+ --batch_size 1 --num_workers 8 \
+ --content_metric lpips --mode art_fid_inf --device cuda
+'''
 
 # 定义常量和辅助类
 ALLOWED_IMAGE_EXTENSIONS = ['jpg', 'JPG', 'jpeg', 'JPEG', 'png', 'PNG']
@@ -164,6 +171,7 @@ def get_image_paths(path, sort=False):
 
     """
     paths = []
+    # 使用 glob 查找所有符合扩展名的文件
     for extension in ALLOWED_IMAGE_EXTENSIONS:
         paths.extend(glob.glob(os.path.join(path, f'*.{extension}')))
     if sort:
@@ -232,18 +240,24 @@ def compute_fid_infinity(path_to_stylized, path_to_style, batch_size, device, nu
     stylized_image_paths = get_image_paths(path_to_stylized)
     style_image_paths = get_image_paths(path_to_style)
 
-    assert len(stylized_image_paths) == len(style_image_paths), \
-           f'Number of stylized images and number of style images must be equal.({len(stylized_image_paths)},{len(style_image_paths)})'
+    # 断言 为了确保风格化图像和风格图像数量一致
+    # assert len(stylized_image_paths) == len(style_image_paths), \
+    #        f'Number of stylized images and number of style images must be equal.({len(stylized_image_paths)},{len(style_image_paths)})'
 
     activations_stylized = get_activations(stylized_image_paths, model, batch_size, device, num_workers)
     activations_style = get_activations(style_image_paths, model, batch_size, device, num_workers)
+    # 图像的索引数组，用于随机采样
     activation_idcs = np.arange(activations_stylized.shape[0])
 
     fids = []
-    
+    # 创建一个从 5000 到 len(stylized_image_paths) 之间的等间距整数数组，用于不同批量大小的 FID 计算
+    # 这里的5000是为了避免计算时内存不足
+    # 生成num个在start和stylized_image_paths之间均匀分布的数值，astype('int32')将其转换为整数
+    # linespace等间距数值
     fid_batches = np.linspace(start=5000, stop=len(stylized_image_paths), num=num_points).astype('int32')
     
     for fid_batch_size in fid_batches:
+        # 打乱 随机采样
         np.random.shuffle(activation_idcs)
         idcs = activation_idcs[:fid_batch_size]
         
@@ -259,6 +273,9 @@ def compute_fid_infinity(path_to_stylized, path_to_style, batch_size, device, nu
     fids = np.array(fids).reshape(-1, 1)
     reg = LinearRegression().fit(1 / fid_batches.reshape(-1, 1), fids)
     fid_infinity = reg.predict(np.array([[0]]))[0,0]
+
+    print(f"不同 batch size 下的 FID: {fids.flatten()}")
+    print(f"预测 batch_size → ∞ 时的 FID: {fid_infinity:.4f}")
 
     return fid_infinity
 
@@ -399,7 +416,7 @@ def compute_art_fid(path_to_stylized, path_to_style, path_to_content, batch_size
         device (str): Device for commputing activations.
         content_metric (str): Metric to use for content distance. Choices: 'lpips', 'vgg', 'alexnet'
         num_workers (int): Number of threads for data loading.
-
+        mode: 决定风格距离的计算方式
     Returns:
         (float) ArtFID value.
     """
@@ -443,7 +460,48 @@ def compute_cfsd(path_to_stylized, path_to_content, batch_size, device, num_work
     simi_dist = f'{simi_val.item():.4f}'
     return simi_dist
 
+# 创建一个新函数，用于调整样式图像路径列表以匹配目标图像数量
+def adjust_paths(stylized_paths, input_paths):
+    """
+    调整样式图像路径列表，使其长度与风格化图像数量相匹配。
+    通过重复引用同一组样式图像路径，而不是复制实际文件。
+    
+    Args:
+        stylized_paths (list): 风格化图像路径列表
+        input_paths (list): 样式图像路径列表
+        
+    Returns:
+        list: 长度与 stylized_paths 匹配的样式图像路径列表
+    """
+    if len(stylized_paths) == len(input_paths):
+        return input_paths
+    
+    # 计算需要重复的倍数
+    ratio = len(stylized_paths) // len(input_paths)
+    remainder = len(stylized_paths) % len(input_paths)
+    
+    # 重复样式图像路径以匹配风格化图像数量
+    adjusted_input_paths = input_paths * ratio
+    
+    # 处理余数
+    if remainder > 0:
+        adjusted_input_paths.extend(input_paths[:remainder])
+    
+    print(f"调整样式图像路径: 原始 {len(input_paths)} 张图像扩展为 {len(adjusted_input_paths)} 张路径")
+    return adjusted_input_paths
+
 def main():
+    '''
+    关于metric的应用
+    1. 首先从命令行获取content_metric参数
+        lpips默认基于alexnet vgg网络的lpip实现 alexnet网络 ssim评估结构信息、亮度和对比度的保留程度,对细节保持较为敏感, mm-ssim是多尺度结构相似性度量
+    2. 将args.content_metric传递给compute_art_fid函数 
+    3. 在compute_art_fid函数中  根据content_metric的值选择相应的metric类
+    根据content_metric的值选择相应的metric类
+    3. 在计算内容距离时  将选定的metric传递给compute_content_distance函数
+    4. 在compute_content_distance函数中  使用选定的metric类来计算内容距离
+    5. 最后返回计算得到的内容距离值
+    '''
     parser = argparse.ArgumentParser()
     parser.add_argument('--batch_size', type=int, default=1, help='Batch size for computing activations.')
     parser.add_argument('--num_workers', type=int, default=8, help='Number of threads used for data loading.')
@@ -454,10 +512,44 @@ def main():
     parser.add_argument('--cnt', type=str, required=True, help='Path to content images.')
     parser.add_argument('--tar', type=str, required=True, help='Path to stylized images.')
     args = parser.parse_args()
+    
+     # 获取图像路径
+    stylized_paths = get_image_paths(args.tar, sort=True)
+    style_paths = get_image_paths(args.sty, sort=True)
+    content_paths = get_image_paths(args.cnt, sort=True)
 
+    ''' 以下是为了确保风格化图像和样式图像数量一致 '''
+    # 调整样式图像路径以匹配风格化图像数量
+    adjusted_style_paths = adjust_paths(stylized_paths, style_paths)
+    adjusted_content_paths = adjust_paths(stylized_paths, content_paths)
+    
+    # 创建临时目录来存储调整后的样式路径
+    temp_style_dir = os.path.join(os.path.dirname(args.tar), "temp_style")
+    os.makedirs(temp_style_dir, exist_ok=True)
+
+    # 创建临时目录来存储调整后的内容路径
+    temp_content_dir = os.path.join(os.path.dirname(args.tar), "temp_content")
+    os.makedirs(temp_content_dir, exist_ok=True)
+
+     # 为每个调整后的样式路径创建符号链接
+    for i, path in enumerate(adjusted_style_paths):
+        # 创建符号链接，指向原始风格图像
+        link_path = os.path.join(temp_style_dir, f"style_{i:06d}.png")
+        if os.path.exists(link_path):
+            os.remove(link_path)
+        os.symlink(os.path.abspath(path), link_path)
+     
+    # 为每个调整后的内容路径创建符号链接
+    for i, path in enumerate(adjusted_content_paths):
+        link_path = os.path.join(temp_content_dir, f"content_{i:06d}.png")
+        if os.path.exists(link_path):
+            os.remove(link_path)
+        os.symlink(os.path.abspath(path), link_path)
+
+    
     artfid, fid, lpips, lpips_gray = compute_art_fid(args.tar,
-                                                    args.sty,
-                                                    args.cnt,
+                                                    temp_style_dir, # 使用调整后的样式路径
+                                                    temp_content_dir,  # 使用调整后的内容路径
                                                     args.batch_size,
                                                     args.device,
                                                     args.mode,
