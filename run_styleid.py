@@ -16,6 +16,11 @@ import torchvision.transforms as transforms
 import torch.nn.functional as F
 import time
 import pickle
+'''
+python run_styleid.py --cnt ./data/cnt --sty ./data/sty \
+    --model_config models/ldm/stable-diffusion-v1/v1-inference.yaml  \
+        --precomputed ./precomputed_feats --ckpt /Users/ran/Documents/Datasets/HE_Patch/sd-v1-4.ckpt
+'''
 
 feat_maps = [] # 全局变量，用于存储特征图
 
@@ -75,7 +80,7 @@ def adain(cnt_feat, sty_feat):
 # 模型加载函数
 def load_model_from_config(config, ckpt, verbose=False):
     print(f"Loading model from {ckpt}")
-    pl_sd = torch.load(ckpt, map_location="cpu")
+    pl_sd = torch.load(ckpt, map_location="cpu", weights_only=False)
     if "global_step" in pl_sd:
         print(f"Global Step: {pl_sd['global_step']}")
     sd = pl_sd["state_dict"]
@@ -87,8 +92,8 @@ def load_model_from_config(config, ckpt, verbose=False):
     if len(u) > 0 and verbose:
         print("unexpected keys:")
         print(u)
-
-    model.cuda()
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+    model.to(device)
     model.eval()
     return model
 
@@ -247,7 +252,7 @@ def main():
 
             # 开始风格迁移
             with torch.no_grad():
-                with precision_scope("cuda"):
+                with precision_scope():
                     with model.ema_scope():
                         # inversion
                         # 生成输出文件名

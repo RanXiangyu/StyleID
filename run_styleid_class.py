@@ -22,13 +22,16 @@ import time
 import pickle
 
 '''
-python run_styleid_class.py --cnt ./data/cnt --sty ./data/sty --output_path ./output --precomputed ./precomputed_feats --model_config models/ldm/stable-diffusion-v1/v1-inference.yaml --ckpt models/ldm/stable-diffusion-v1/sd-v1-4.ckpt
+python run_styleid_class.py --cnt ./data/cnt --sty ./data/sty \
+    --output_path ./output --precomputed ./precomputed_feats \
+    --model_config models/ldm/stable-diffusion-v1/v1-inference.yaml \
+    --ckpt /Users/ran/Documents/Datasets/HE_Patch/sd-v1-4.ckpt
 '''
 class StyleID:
     def __init__(
         self,
         model_config_path="models/ldm/stable-diffusion-v1/v1-inference.yaml",
-        model_ckpt_path="models/ldm/stable-diffusion-v1/sd-v1-4.ckpt",
+        model_ckpt_path="/Users/ran/Documents/Datasets/HE_Patch/sd-v1-4.ckpt",
         precomputed_dir="precomputed_feats",
         output_dir="output",
         device=None,
@@ -298,10 +301,14 @@ class StyleID:
             # if self.precomputed_dir:
             #     with open(cnt_feat_name, 'wb') as h:
             #         pickle.dump(cnt_feat, h)
-
+        
+        # if self.precision == "autocast" and torch.cuda.is_available():
+        #     precision_scope = lambda: autocast("cuda")
+        # else:
+        precision_scope = nullcontext
+        
         with torch.no_grad():
-            precision_scope = autocast if self.precision == "autocast" else nullcontext
-            with precision_scope("cuda"):
+            with precision_scope():
                 with self.model.ema_scope():
                     # AdaIN 处理潜在编码
                     if not use_adain:
@@ -385,22 +392,24 @@ class StyleID:
         
         # 批量处理
         with tqdm(total=total, desc="批处理风格迁移") as pbar:
+            print("1")
             for content_img in content_imgs:
                 for style_img in style_imgs:
                     content_path = os.path.join(content_dir, content_img)
                     style_path = os.path.join(style_dir, style_img)
-                    
+                    print("2")
                     try:
                         result_path = self.transfer_style(
                             content_path, style_path, **kwargs
                         )
                         results.append(result_path)
-                        
+                        print(f"3")
                     except Exception as e:
+                        print(f"5")
                         print(f"处理 {content_img} 和 {style_img} 时出错: {e}")
                     
                     pbar.update(1)
-        
+        print("4")
         # 恢复原始输出目录
         if output_dir:
             self.output_dir = old_output_dir
@@ -445,6 +454,7 @@ def main():
  # 检查输入是文件还是目录
     if os.path.isdir(opt.cnt) and os.path.isdir(opt.sty):
         # 批量处理
+        print(f"批量处理内容目录: {opt.cnt} 和风格目录: {opt.sty}")
         model.batch_transfer(
             content_dir=opt.cnt,
             style_dir=opt.sty,
@@ -456,6 +466,7 @@ def main():
         )
     else:
         # 单图处理
+        print(f"处理单张图像: {opt.cnt} 和 {opt.sty}")
         model.transfer_style(
             content_img_path=opt.cnt,
             style_img_path=opt.sty,
