@@ -92,7 +92,7 @@ def load_model_from_config(config, ckpt, verbose=False):
     if len(u) > 0 and verbose:
         print("unexpected keys:")
         print(u)
-    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
     model.eval()
     return model

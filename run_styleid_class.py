@@ -22,11 +22,8 @@ import time
 import pickle
 
 '''
-python run_styleid_class.py --cnt ./data/cnt --sty ./data/sty \
-    --output_path ./output --precomputed ./precomputed_feats \
-    --model_config models/ldm/stable-diffusion-v1/v1-inference.yaml \
-    --ckpt /Users/ran/Documents/Datasets/HE_Patch/sd-v1-4.ckpt
-'''
+python run_styleid_class.py 
+        '''
 class StyleID:
     def __init__(
         self,
@@ -34,12 +31,12 @@ class StyleID:
         model_ckpt_path="/Users/ran/Documents/Datasets/HE_Patch/sd-v1-4.ckpt",
         precomputed_dir="precomputed_feats",
         output_dir="output",
-        device=None,
+        device="cpu",
         seed=22,
         gamma=0.75,
         temperature=1.5,
         attn_layers="6,7,8,9,10,11",
-        precision="autocast"
+        precision="full",
     ):
         self.model_config_path = model_config_path
         self.model_ckpt_path = model_ckpt_path
@@ -51,10 +48,35 @@ class StyleID:
         if precomputed_dir:
             os.makedirs(precomputed_dir, exist_ok=True)
             
+        # if device is None:
+        #     self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # else:   
+        #     self.device = torch.device(device)
         if device is None:
-            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        else:   
-            self.device = torch.device(device)
+            if force_cpu:
+                self.device = torch.device("cpu")
+                print("强制使用 CPU")
+            elif torch.cuda.is_available():
+                self.device = torch.device("cuda")
+                print("使用 CUDA 加速")
+            elif hasattr(torch, 'has_mps') and torch.has_mps and torch.backends.mps.is_available():
+                # Mac 上的 MPS 设备会导致问题，所以我们强制使用 CPU
+                print("检测到 MPS 设备，但因兼容性问题强制使用 CPU")
+                self.device = torch.device("cpu")
+            else:
+                self.device = torch.device("cpu")
+                print("使用 CPU")
+        else:
+            if device == "mps" or (isinstance(device, torch.device) and device.type == "mps"):
+                print("MPS 设备可能导致兼容性问题，强制使用 CPU")
+                self.device = torch.device("cpu")
+            else:
+                self.device = torch.device(device)
+            
+        # 在 CPU 上设置精度为 "full"
+        if self.device.type == "cpu":
+            self.precision = "full"
+            print("在 CPU 上使用 full 精度")
 
         seed_everything(seed)
 
@@ -405,11 +427,11 @@ class StyleID:
                         results.append(result_path)
                         print(f"3")
                     except Exception as e:
-                        print(f"5")
+                        print(f"4")
                         print(f"处理 {content_img} 和 {style_img} 时出错: {e}")
                     
                     pbar.update(1)
-        print("4")
+        print("5")
         # 恢复原始输出目录
         if output_dir:
             self.output_dir = old_output_dir
@@ -425,14 +447,14 @@ def main():
     parser.add_argument('--output_path', type=str, default='output', help='输出目录')
     parser.add_argument('--precomputed', type=str, default='./precomputed_feats', help='预计算特征存储目录')
     parser.add_argument('--model_config', type=str, default='models/ldm/stable-diffusion-v1/v1-inference.yaml', help='模型配置')
-    parser.add_argument('--ckpt', type=str, default='models/ldm/stable-diffusion-v1/model.ckpt', help='模型权重')
+    parser.add_argument('--ckpt', type=str, default='/Users/ran/Documents/Datasets/HE_Patch/sd-v1-4.ckpt', help='模型权重')
     parser.add_argument('--ddim_steps', type=int, default=50, help='DDIM 步数')
     parser.add_argument('--ddim_eta', type=float, default=0.0, help='DDIM eta')
     parser.add_argument('--start_step', type=int, default=49, help='开始步骤')
     parser.add_argument('--gamma', type=float, default=0.75, help='查询保留超参数')
     parser.add_argument('--T', type=float, default=1.5, help='注意力温度超参数')
     parser.add_argument("--attn_layer", type=str, default='6,7,8,9,10,11', help='注入特征层')
-    parser.add_argument('--precision', type=str, default='autocast', help='精度: full 或 autocast')
+    parser.add_argument('--precision', type=str, default='full', help='精度: full 或 autocast')
     parser.add_argument("--without_init_adain", action='store_true', help='禁用 AdaIN')
     parser.add_argument("--without_attn_injection", action='store_true', help='禁用注意力注入')
     parser.add_argument('--seed', type=int, default=22, help='随机种子')
