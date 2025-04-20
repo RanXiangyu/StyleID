@@ -141,10 +141,12 @@ class StyleID:
             self.idx_time_dict[t] = i
             self.time_idx_dict[i] = t
 
-    def _save_feature_map(self, feat_maps, filename, time):
-        # 保存特征图到全局特征列表
+    def _save_feature_map(self, feature_map, filename, time):
+        # 保存单个特征图
+        # cur_idx = self.idx_time_dict[time]
+        # self.feat_maps[cur_idx] = feat_maps
         cur_idx = self.idx_time_dict[time]
-        self.feat_maps[cur_idx] = feat_maps
+        self.feat_maps[cur_idx][f"{filename}"] = feature_map
 
     def _save_feature_maps(self, blocks, i, feature_type="input_block"):
         # 保存特定块的
@@ -255,6 +257,8 @@ class StyleID:
 
         shape = (4, h // 8, w // 8)   # latent space中的大小
 
+
+
         # 加载风格图像并获取特征
         print(f"Loading style image from {style_img_path}")
         sty_feat_name = os.path.join(
@@ -267,7 +271,7 @@ class StyleID:
                 sty_feat = pickle.load(h)
                 sty_z_enc = torch.clone(sty_feat[0]['z_enc'])
         else:
-            init_sty = self._load_img(style_img_path, h, w).to(self.device)
+            init_sty = self._load_img(style_img_path, 512, 512).to(self.device)
             init_sty = self.model.get_first_stage_encoding(
                 self.model.encode_first_stage(init_sty) # 送入vae编码器，得到编码后表示feature map
             )
@@ -302,7 +306,7 @@ class StyleID:
                 cnt_z_enc = torch.clone(cnt_feat[0]['z_enc'])
         else:
             # 加载并编码内容图像
-            init_cnt = self._load_img(content_img_path, h, w).to(self.device)
+            init_cnt = self._load_img(content_img_path, 512, 512).to(self.device)
             init_cnt = self.model.get_first_stage_encoding(
                 self.model.encode_first_stage(init_cnt)
             )
@@ -339,13 +343,14 @@ class StyleID:
                         adain_z_enc = self._adain(cnt_z_enc, sty_z_enc)
                     
                     # 合并特征
-                    merged_feat_maps = self._feat_merge(
-                        cnt_feat, sty_feat, start_step=start_step
-                    )
+                    # merged_feat_maps = self._feat_merge(
+                    #     cnt_feat, sty_feat, start_step=start_step
+                    # )
+                    self.feat_maps = self._feat_merge(cnt_feat, sty_feat, start_step=start_step)
                     
                     # 如果不使用注意力注入则设置为 None
                     if not use_attn_injection:
-                        merged_feat_maps = None
+                        self.feat_maps = None
                     
                     # 采样生成结果
                     samples_ddim, _ = self.sampler.sample(
@@ -356,8 +361,9 @@ class StyleID:
                         unconditional_conditioning=uc,
                         eta=ddim_eta,
                         x_T=adain_z_enc,
-                        injected_features=merged_feat_maps,
+                        injected_features=self.feat_maps,
                         start_step=start_step,
+                        
                     )
                     
      # 解码生成图像
@@ -420,15 +426,15 @@ class StyleID:
                     content_path = os.path.join(content_dir, content_img)
                     style_path = os.path.join(style_dir, style_img)
                     print("2")
-                    try:
-                        result_path = self.transfer_style(
-                            content_path, style_path, **kwargs
-                        )
-                        results.append(result_path)
-                        print(f"3")
-                    except Exception as e:
-                        print(f"4")
-                        print(f"处理 {content_img} 和 {style_img} 时出错: {e}")
+                    
+                    result_path = self.transfer_style(
+                        content_path, style_path, **kwargs
+                    )
+                    results.append(result_path)
+                    print(f"3")
+                    # except Exception as e:
+                    #     print(f"4")
+                    #     print(f"处理 {content_img} 和 {style_img} 时出错: {e}")
                     
                     pbar.update(1)
         print("5")

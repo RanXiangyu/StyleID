@@ -221,10 +221,12 @@ def main():
                 sty_z_enc = torch.clone(sty_feat[0]['z_enc'])
         else:
             init_sty = model.get_first_stage_encoding(model.encode_first_stage(init_sty))
-            sty_z_enc, _ = sampler.encode_ddim(init_sty.clone(), num_steps=ddim_inversion_steps, unconditional_conditioning=uc, \
-                                                end_step=time_idx_dict[ddim_inversion_steps-1-start_step], \
-                                                callback_ddim_timesteps=save_feature_timesteps,
-                                                img_callback=ddim_sampler_callback)
+            sty_z_enc, _ = sampler.encode_ddim(
+                init_sty.clone(), 
+                num_steps=ddim_inversion_steps, unconditional_conditioning=uc, 
+                end_step=time_idx_dict[ddim_inversion_steps-1-start_step], 
+                callback_ddim_timesteps=save_feature_timesteps,
+                img_callback=ddim_sampler_callback)
             sty_feat = copy.deepcopy(feat_maps)
             sty_z_enc = feat_maps[0]['z_enc']
 
