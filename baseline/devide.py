@@ -2,9 +2,9 @@ import os
 import shutil
 
 # 定义源文件夹和目标文件夹
-source_dir = '/data2/ranxiangyu/kidney_patch/patch_png/level0/22811masson'
-test_dir = '/data2/ranxiangyu/styleid_out/style_out/cyclegan/testB'
-train_dir = '/data2/ranxiangyu/styleid_out/style_out/cyclegan/trainB'
+source_dir = '/data2/ranxiangyu/kidney_patch/patch_png/level0/22811pasm'
+test_dir = '/data2/ranxiangyu/styleid_out/style_out/cyclegan_pasm/testB'
+train_dir = '/data2/ranxiangyu/styleid_out/style_out/cyclegan_pasm/trainB'
 
 # 创建目标文件夹（如果不存在的话）
 os.makedirs(test_dir, exist_ok=True)

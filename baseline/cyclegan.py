@@ -44,6 +44,10 @@ class ImageDataset(Dataset):
             image_B = Image.open(self.files_B[random.randint(0, len(self.files_B) - 1)])
         else:
             image_B = Image.open(self.files_B[index % len(self.files_B)])
+            
+        # 调整大小以确保尺寸匹配 不推荐！
+        image_A = image_A.resize((256, 256), Image.BICUBIC)
+        image_B = image_B.resize((256, 256), Image.BICUBIC)
 
         # 如果是灰度图，把灰度图转换为RGB图
         if image_A.mode != "RGB":
@@ -229,7 +233,7 @@ class LambdaLR:
 parser = argparse.ArgumentParser()
 parser.add_argument("--epoch", type=int, default=0, help="epoch to start training from")
 parser.add_argument("--n_epochs", type=int, default=5, help="number of epochs of training")
-parser.add_argument("--dataset_name", type=str, default="/data2/ranxiangyu/styleid_out/style_out/cyclegan", help="name of the dataset")## ../input/facades-dataset
+parser.add_argument("--dataset_name", type=str, default="/data2/ranxiangyu/styleid_out/style_out/cyclegan_pasm", help="name of the dataset")## ../input/facades-dataset
 parser.add_argument("--batch_size", type=int, default=1, help="size of the batches")
 parser.add_argument("--lr", type=float, default=0.0003, help="adam: learning rate")
 parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
@@ -245,13 +249,19 @@ parser.add_argument("--n_residual_blocks", type=int, default=9, help="number of 
 parser.add_argument("--lambda_cyc", type=float, default=10.0, help="cycle loss weight")
 parser.add_argument("--lambda_id", type=float, default=5.0, help="identity loss weight")
 parser.add_argument("--gpu", type=int, default=0, help="GPU ID")  ## GPU ID
+parser.add_argument("--save_dir", type=str, default="data2/ranxiangyu/styleid_out/style_out/cyclegan_pasm", help="directory to save models")
+parser.add_argument("--sample_dir", type=str, default="data2/ranxiangyu/styleid_out/style_out/cyclegan_pasm/results", help="directory to save samples")
+
 opt = parser.parse_args()
 # opt = parser.parse_args(args=[])                 ## 在colab中运行时，换为此行
 print(opt)
 
 ## 创建文件夹
-os.makedirs("images/%s" % opt.dataset_name, exist_ok=True)
-os.makedirs("save/%s" % opt.dataset_name, exist_ok=True)
+# os.makedirs("images/%s" % opt.dataset_name, exist_ok=True)
+# os.makedirs("save/%s" % opt.dataset_name, exist_ok=True)
+os.makedirs(opt.sample_dir, exist_ok=True)
+os.makedirs(opt.save_dir, exist_ok=True)
+
 
 ## input_shape:(3, 256, 256)
 input_shape = (opt.channels, opt.img_height, opt.img_width)         
@@ -282,10 +292,10 @@ if torch.cuda.is_available():
 ## 如果epoch == 0，初始化模型参数; 如果epoch == n, 载入训练到第n轮的预训练模型
 if opt.epoch != 0:
     # 载入训练到第n轮的预训练模型
-    G_AB.load_state_dict(torch.load("save/%s/G_AB_%d.pth" % (opt.dataset_name, opt.epoch)))
-    G_BA.load_state_dict(torch.load("save/%s/G_BA_%d.pth" % (opt.dataset_name, opt.epoch)))
-    D_A.load_state_dict(torch.load("save/%s/D_A_%d.pth" % (opt.dataset_name, opt.epoch)))
-    D_B.load_state_dict(torch.load("save/%s/D_B_%d.pth" % (opt.dataset_name, opt.epoch)))
+    G_AB.load_state_dict(torch.load("%s/G_AB_%d.pth" % (opt.dataset_name, opt.epoch)))
+    G_BA.load_state_dict(torch.load("%s/G_BA_%d.pth" % (opt.dataset_name, opt.epoch)))
+    D_A.load_state_dict(torch.load("%s/D_A_%d.pth" % (opt.dataset_name, opt.epoch)))
+    D_B.load_state_dict(torch.load("%s/D_B_%d.pth" % (opt.dataset_name, opt.epoch)))
 else:
     # 初始化模型参数
     G_AB.apply(weights_init_normal)
@@ -328,14 +338,14 @@ transforms_ = [
 
 ## Training data loader 
 dataloader = DataLoader(        ## 改成自己存放文件的目录
-    ImageDataset("/data2/ranxiangyu/styleid_out/style_out/cyclegan", transforms_=transforms_, unaligned=True),  ## "./datasets/facades" , unaligned:设置非对其数据
+    ImageDataset("/data2/ranxiangyu/styleid_out/style_out/cyclegan_pasm", transforms_=transforms_, unaligned=True),  ## "./datasets/facades" , unaligned:设置非对其数据
     batch_size=opt.batch_size,                                                                  ## batch_size = 1
     shuffle=True,
     num_workers=opt.n_cpu,
 )
 ## Test data loader
 val_dataloader = DataLoader(
-    ImageDataset("/data2/ranxiangyu/styleid_out/style_out/cyclegan", transforms_=transforms_, unaligned=True, mode="test"), ## "./datasets/facades"
+    ImageDataset("/data2/ranxiangyu/styleid_out/style_out/cyclegan_pasm", transforms_=transforms_, unaligned=True, mode="test"), ## "./datasets/facades"
     batch_size=5,
     shuffle=True,
     num_workers=1,
@@ -361,8 +371,7 @@ def sample_images(batches_done):      ## （100/200/300/400...）
     # Arange images along y-axis
     ## 把以上图像都拼接起来，保存为一张大图片
     image_grid = torch.cat((real_A, fake_B, real_B, fake_A), 1)
-    save_image(image_grid, "images/%s/%s.png" % (opt.dataset_name, batches_done), normalize=False)
-
+    save_image(image_grid, f"{opt.sample_dir}/{batches_done}.png", normalize=False)
 
 
 def train():
@@ -490,10 +499,10 @@ def train():
 
         
     ## 训练结束后，保存模型
-    torch.save(G_AB.state_dict(), "save/%s/G_AB_%d.pth" % (opt.dataset_name, epoch))
-    torch.save(G_BA.state_dict(), "save/%s/G_BA_%d.pth" % (opt.dataset_name, epoch))
-    torch.save(D_A.state_dict(), "save/%s/D_A_%d.pth" % (opt.dataset_name, epoch))
-    torch.save(D_B.state_dict(), "save/%s/D_B_%d.pth" % (opt.dataset_name, epoch))
+    torch.save(G_AB.state_dict(), "%s/G_AB_%d.pth" % (opt.dataset_name, epoch))
+    torch.save(G_BA.state_dict(), "%s/G_BA_%d.pth" % (opt.dataset_name, epoch))
+    torch.save(D_A.state_dict(), "%s/D_A_%d.pth" % (opt.dataset_name, epoch))
+    torch.save(D_B.state_dict(), "%s/D_B_%d.pth" % (opt.dataset_name, epoch))
     print("\nsave my model finished !!")
     #    ## 每间隔几个epoch保存一次模型
     #     if opt.checkpoint_interval != -1 and epoch % opt.checkpoint_interval == 0:
@@ -507,15 +516,17 @@ def train():
 def test():
     ## 超参数设置
     parser = argparse.ArgumentParser()
-    parser.add_argument('--batchSize', type=int, default=2, help='size of the batches')
-    parser.add_argument('--dataroot', type=str, default='/data2/ranxiangyu/styleid_out/style_out/cyclegan', help='root directory of the dataset')
+    parser.add_argument('--batchSize', type=int, default=1, help='size of the batches')
+    parser.add_argument('--dataroot', type=str, default='/data2/ranxiangyu/styleid_out/style_out/cyclegan_pasm', help='root directory of the dataset')
     parser.add_argument('--channels', type=int, default=3, help='number of channels of input data')
     parser.add_argument('--n_residual_blocks', type=int, default=9, help='number of channels of output data')
     parser.add_argument('--size', type=int, default=256, help='size of the data (squared assumed)')
     parser.add_argument('--cuda', type=bool, default=True, help='use GPU computation')
     parser.add_argument('--n_cpu', type=int, default=8, help='number of cpu threads to use during batch generation')
-    parser.add_argument('--generator_A2B', type=str, default='/data2/ranxiangyu/styleid_out/style_out/cyclegan/G_AB_4.pth', help='A2B generator checkpoint file')
-    parser.add_argument('--generator_B2A', type=str, default='/data2/ranxiangyu/styleid_out/style_out/cyclegan/G_BA_4.pth', help='B2A generator checkpoint file')
+    parser.add_argument('--generator_A2B', type=str, default='/data2/ranxiangyu/styleid_out/style_out/cyclegan_pasm/G_AB_4.pth', help='A2B generator checkpoint file')
+    parser.add_argument('--generator_B2A', type=str, default='/data2/ranxiangyu/styleid_out/style_out/cyclegan_pasm/G_BA_4.pth', help='B2A generator checkpoint file')
+
+
     opt = parser.parse_args()
     print(opt)
 
@@ -561,10 +572,11 @@ def test():
     #################################
 
     '''如果文件路径不存在, 则创建一个 (存放测试输出的图片)'''
-    if not os.path.exists('output/A'):
-        os.makedirs('output/A')
-    if not os.path.exists('output/B'):
-        os.makedirs('output/B')
+    output_dir = '/data2/ranxiangyu/styleid_out/style_out/cyclegan_pasm/output'  # 修改为您想要的路径
+    if not os.path.exists(f'{output_dir}/A'):
+        os.makedirs(f'{output_dir}/A')
+    if not os.path.exists(f'{output_dir}/B'):
+        os.makedirs(f'{output_dir}/B')
 
     for i, batch in enumerate(dataloader):
         ## 输入数据 real
@@ -574,13 +586,13 @@ def test():
         fake_B = 0.5*(netG_A2B(real_A).data + 1.0)
         fake_A = 0.5*(netG_B2A(real_B).data + 1.0)
         ## 保存图片
-        save_image(fake_A, 'output/A/%04d.png' % (i+1))
-        save_image(fake_B, 'output/B/%04d.png' % (i+1))
+        save_image(fake_A, f'{output_dir}/A/%04d.png' % (i+1))
+        save_image(fake_B, f'{output_dir}/B/%04d.png' % (i+1))
         print('processing (%04d)-th image...' % (i))
     print("测试完成")
 
 
 ## 函数的起始
 if __name__ == '__main__':
-    train()  ## 训练
-    # test()   ## 测试
+    # train()  ## 训练
+    test()   ## 测试
